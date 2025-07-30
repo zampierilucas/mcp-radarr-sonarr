@@ -13,6 +13,13 @@ from mcp.server.models import InitializationOptions
 import requests
 
 from .config import load_config as load_config_module
+from .tools_extended import get_extended_tools
+from .handlers_extended import (
+    handle_download_queue, handle_remove_from_queue, handle_get_history,
+    handle_manual_import, handle_calendar, handle_wanted, handle_system_status,
+    handle_disk_space, handle_execute_command, handle_get_collections,
+    handle_refresh_monitored
+)
 
 # Set up logging to stderr (never to stdout as it corrupts MCP JSON-RPC)
 logging.basicConfig(
@@ -79,6 +86,8 @@ def make_radarr_request(config, endpoint, params=None, method="GET", json_data=N
     try:
         if method.upper() == "POST":
             response = requests.post(url, headers=headers, params=params, json=json_data, timeout=30)
+        elif method.upper() == "PUT":
+            response = requests.put(url, headers=headers, params=params, json=json_data, timeout=30)
         else:
             response = requests.get(url, headers=headers, params=params, timeout=30)
         response.raise_for_status()
@@ -102,6 +111,8 @@ def make_sonarr_request(config, endpoint, params=None, method="GET", json_data=N
     try:
         if method.upper() == "POST":
             response = requests.post(url, headers=headers, params=params, json=json_data, timeout=30)
+        elif method.upper() == "PUT":
+            response = requests.put(url, headers=headers, params=params, json=json_data, timeout=30)
         else:
             response = requests.get(url, headers=headers, params=params, timeout=30)
         response.raise_for_status()
@@ -114,7 +125,7 @@ def make_sonarr_request(config, endpoint, params=None, method="GET", json_data=N
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
     """List available tools."""
-    return [
+    base_tools = [
         types.Tool(
             name="get_radarr_movies",
             description="Get list of movies from Radarr",
@@ -269,8 +280,221 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["tvdbId", "title", "year"],
                 "additionalProperties": False
             }
+        ),
+        types.Tool(
+            name="delete_radarr_movie",
+            description="Delete a movie from Radarr library",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The movie ID to delete"
+                    },
+                    "deleteFiles": {
+                        "type": "boolean",
+                        "description": "Whether to delete the movie files from disk",
+                        "default": False
+                    },
+                    "addImportExclusion": {
+                        "type": "boolean",
+                        "description": "Whether to add to import exclusion list to prevent re-import",
+                        "default": False
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="delete_sonarr_series",
+            description="Delete a TV series from Sonarr library",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The series ID to delete"
+                    },
+                    "deleteFiles": {
+                        "type": "boolean",
+                        "description": "Whether to delete the series files from disk",
+                        "default": False
+                    },
+                    "addImportListExclusion": {
+                        "type": "boolean",
+                        "description": "Whether to add to import exclusion list to prevent re-import",
+                        "default": False
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="update_radarr_movie", 
+            description="Update a movie's settings in Radarr",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The movie ID to update"
+                    },
+                    "monitored": {
+                        "type": "boolean",
+                        "description": "Whether to monitor the movie"
+                    },
+                    "qualityProfileId": {
+                        "type": "integer",
+                        "description": "Quality profile ID"
+                    },
+                    "minimumAvailability": {
+                        "type": "string",
+                        "description": "Minimum availability (announced, inCinemas, released, preDB)",
+                        "enum": ["announced", "inCinemas", "released", "preDB"]
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Array of tag IDs"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="update_sonarr_series",
+            description="Update a TV series' settings in Sonarr", 
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The series ID to update"
+                    },
+                    "monitored": {
+                        "type": "boolean",
+                        "description": "Whether to monitor the series"
+                    },
+                    "qualityProfileId": {
+                        "type": "integer",
+                        "description": "Quality profile ID"
+                    },
+                    "seriesType": {
+                        "type": "string",
+                        "description": "Series type",
+                        "enum": ["standard", "daily", "anime"]
+                    },
+                    "seasonFolder": {
+                        "type": "boolean",
+                        "description": "Whether to use season folders"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Array of tag IDs"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="get_radarr_movie_by_id",
+            description="Get detailed information about a specific movie",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The movie ID"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="get_sonarr_series_by_id",
+            description="Get detailed information about a specific TV series",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The series ID"
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="get_sonarr_episodes",
+            description="Get episodes for a specific TV series",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "seriesId": {
+                        "type": "integer",
+                        "description": "The series ID"
+                    },
+                    "seasonNumber": {
+                        "type": "integer",
+                        "description": "Filter by season number (optional)"
+                    },
+                    "includeImages": {
+                        "type": "boolean",
+                        "description": "Include episode images",
+                        "default": False
+                    }
+                },
+                "required": ["seriesId"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="monitor_sonarr_episodes",
+            description="Bulk update episode monitoring status",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "episodeIds": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Array of episode IDs to update"
+                    },
+                    "monitored": {
+                        "type": "boolean",
+                        "description": "Whether to monitor the episodes"
+                    }
+                },
+                "required": ["episodeIds", "monitored"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="get_sonarr_episode_files",
+            description="Get episode files for a specific TV series",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "seriesId": {
+                        "type": "integer",
+                        "description": "The series ID"
+                    }
+                },
+                "required": ["seriesId"],
+                "additionalProperties": False
+            }
         )
     ]
+    
+    # Add extended tools
+    extended_tools = get_extended_tools()
+    return base_tools + extended_tools
 
 
 @server.call_tool()
@@ -475,6 +699,330 @@ async def handle_call_tool(
                     "seasonCount": len(added_series.get("seasons", []))
                 }
             }
+            
+        elif name == "delete_radarr_movie":
+            movie_id = arguments["id"]
+            delete_files = arguments.get("deleteFiles", False)
+            add_import_exclusion = arguments.get("addImportExclusion", False)
+            
+            # Delete movie from Radarr
+            params = {
+                "deleteFiles": delete_files,
+                "addImportExclusion": add_import_exclusion
+            }
+            
+            # Radarr uses DELETE method with query parameters
+            base_url = get_radarr_url(config)
+            api_key = config["radarrConfig"]["apiKey"]
+            headers = {"X-Api-Key": api_key}
+            url = f"{base_url}/movie/{movie_id}"
+            
+            try:
+                response = requests.delete(url, headers=headers, params=params, timeout=30)
+                response.raise_for_status()
+                
+                result = {
+                    "success": True,
+                    "message": f"Movie with ID {movie_id} has been deleted from Radarr",
+                    "deleteFiles": delete_files,
+                    "addImportExclusion": add_import_exclusion
+                }
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Failed to delete movie: {e}")
+                raise
+            
+        elif name == "update_radarr_movie":
+            movie_id = arguments["id"]
+            
+            # First get the existing movie to preserve fields
+            existing_movie = make_radarr_request(config, f"movie/{movie_id}")
+            
+            # Update only the provided fields
+            if "monitored" in arguments:
+                existing_movie["monitored"] = arguments["monitored"]
+            if "qualityProfileId" in arguments:
+                existing_movie["qualityProfileId"] = arguments["qualityProfileId"]
+            if "minimumAvailability" in arguments:
+                existing_movie["minimumAvailability"] = arguments["minimumAvailability"]
+            if "tags" in arguments:
+                existing_movie["tags"] = arguments["tags"]
+            
+            # Update movie in Radarr
+            updated_movie = make_radarr_request(config, f"movie/{movie_id}", method="PUT", json_data=existing_movie)
+            
+            result = {
+                "success": True,
+                "message": f"Movie '{updated_movie.get('title')}' has been updated",
+                "movie": {
+                    "id": updated_movie.get("id"),
+                    "title": updated_movie.get("title"),
+                    "year": updated_movie.get("year"),
+                    "monitored": updated_movie.get("monitored"),
+                    "qualityProfileId": updated_movie.get("qualityProfileId"),
+                    "minimumAvailability": updated_movie.get("minimumAvailability"),
+                    "tags": updated_movie.get("tags", [])
+                }
+            }
+            
+        elif name == "update_sonarr_series":
+            series_id = arguments["id"]
+            
+            # First get the existing series to preserve fields
+            existing_series = make_sonarr_request(config, f"series/{series_id}")
+            
+            # Update only the provided fields
+            if "monitored" in arguments:
+                existing_series["monitored"] = arguments["monitored"]
+            if "qualityProfileId" in arguments:
+                existing_series["qualityProfileId"] = arguments["qualityProfileId"]
+            if "seriesType" in arguments:
+                existing_series["seriesType"] = arguments["seriesType"]
+            if "seasonFolder" in arguments:
+                existing_series["seasonFolder"] = arguments["seasonFolder"]
+            if "tags" in arguments:
+                existing_series["tags"] = arguments["tags"]
+            
+            # Update series in Sonarr
+            updated_series = make_sonarr_request(config, f"series/{series_id}", method="PUT", json_data=existing_series)
+            
+            result = {
+                "success": True,
+                "message": f"Series '{updated_series.get('title')}' has been updated",
+                "series": {
+                    "id": updated_series.get("id"),
+                    "title": updated_series.get("title"),
+                    "year": updated_series.get("year"),
+                    "monitored": updated_series.get("monitored"),
+                    "qualityProfileId": updated_series.get("qualityProfileId"),
+                    "seriesType": updated_series.get("seriesType"),
+                    "seasonFolder": updated_series.get("seasonFolder"),
+                    "tags": updated_series.get("tags", [])
+                }
+            }
+            
+        elif name == "get_radarr_movie_by_id":
+            movie_id = arguments["id"]
+            movie = make_radarr_request(config, f"movie/{movie_id}")
+            
+            result = {
+                "movie": {
+                    "id": movie.get("id"),
+                    "title": movie.get("title"),
+                    "year": movie.get("year"),
+                    "tmdbId": movie.get("tmdbId"),
+                    "imdbId": movie.get("imdbId"),
+                    "overview": movie.get("overview"),
+                    "status": movie.get("status"),
+                    "monitored": movie.get("monitored"),
+                    "hasFile": movie.get("hasFile", False),
+                    "qualityProfileId": movie.get("qualityProfileId"),
+                    "minimumAvailability": movie.get("minimumAvailability"),
+                    "rootFolderPath": movie.get("rootFolderPath"),
+                    "path": movie.get("path"),
+                    "runtime": movie.get("runtime"),
+                    "genres": movie.get("genres", []),
+                    "ratings": movie.get("ratings", {}),
+                    "sizeOnDisk": movie.get("sizeOnDisk", 0),
+                    "tags": movie.get("tags", [])
+                }
+            }
+            
+        elif name == "get_sonarr_series_by_id":
+            series_id = arguments["id"]
+            series = make_sonarr_request(config, f"series/{series_id}")
+            
+            result = {
+                "series": {
+                    "id": series.get("id"),
+                    "title": series.get("title"),
+                    "year": series.get("year"),
+                    "tvdbId": series.get("tvdbId"),
+                    "imdbId": series.get("imdbId"),
+                    "overview": series.get("overview"),
+                    "status": series.get("status"),
+                    "monitored": series.get("monitored"),
+                    "qualityProfileId": series.get("qualityProfileId"),
+                    "seriesType": series.get("seriesType"),
+                    "seasonFolder": series.get("seasonFolder"),
+                    "rootFolderPath": series.get("rootFolderPath"),
+                    "path": series.get("path"),
+                    "runtime": series.get("runtime"),
+                    "genres": series.get("genres", []),
+                    "ratings": series.get("ratings", {}),
+                    "seasonCount": len(series.get("seasons", [])),
+                    "totalEpisodeCount": series.get("statistics", {}).get("episodeCount", 0),
+                    "episodeFileCount": series.get("statistics", {}).get("episodeFileCount", 0),
+                    "sizeOnDisk": series.get("statistics", {}).get("sizeOnDisk", 0),
+                    "tags": series.get("tags", [])
+                }
+            }
+            
+        elif name == "get_sonarr_episodes":
+            series_id = arguments["seriesId"]
+            season_number = arguments.get("seasonNumber")
+            include_images = arguments.get("includeImages", False)
+            
+            # Get episodes for the series
+            params = {"seriesId": series_id}
+            if season_number is not None:
+                params["seasonNumber"] = season_number
+            if include_images:
+                params["includeImages"] = True
+                
+            episodes = make_sonarr_request(config, "episode", params=params)
+            
+            result = {
+                "count": len(episodes),
+                "episodes": [
+                    {
+                        "id": ep.get("id"),
+                        "seriesId": ep.get("seriesId"),
+                        "episodeNumber": ep.get("episodeNumber"),
+                        "seasonNumber": ep.get("seasonNumber"),
+                        "title": ep.get("title"),
+                        "airDate": ep.get("airDate"),
+                        "airDateUtc": ep.get("airDateUtc"),
+                        "overview": ep.get("overview", "")[:200] + "..." if len(ep.get("overview", "")) > 200 else ep.get("overview", ""),
+                        "hasFile": ep.get("hasFile", False),
+                        "monitored": ep.get("monitored"),
+                        "episodeFileId": ep.get("episodeFileId"),
+                        "absoluteEpisodeNumber": ep.get("absoluteEpisodeNumber")
+                    }
+                    for ep in episodes
+                ]
+            }
+            
+        elif name == "monitor_sonarr_episodes":
+            episode_ids = arguments["episodeIds"]
+            monitored = arguments["monitored"]
+            
+            # Prepare the update data
+            update_data = {
+                "episodeIds": episode_ids,
+                "monitored": monitored
+            }
+            
+            # Update episodes monitoring status
+            make_sonarr_request(config, "episode/monitor", method="PUT", json_data=update_data)
+            
+            result = {
+                "success": True,
+                "message": f"Updated monitoring status for {len(episode_ids)} episodes",
+                "episodeIds": episode_ids,
+                "monitored": monitored
+            }
+            
+        elif name == "get_sonarr_episode_files":
+            series_id = arguments["seriesId"]
+            
+            # Get episode files for the series
+            episode_files = make_sonarr_request(config, "episodefile", params={"seriesId": series_id})
+            
+            result = {
+                "count": len(episode_files),
+                "episodeFiles": [
+                    {
+                        "id": ef.get("id"),
+                        "seriesId": ef.get("seriesId"),
+                        "seasonNumber": ef.get("seasonNumber"),
+                        "relativePath": ef.get("relativePath"),
+                        "path": ef.get("path"),
+                        "size": ef.get("size", 0),
+                        "dateAdded": ef.get("dateAdded"),
+                        "quality": ef.get("quality", {}),
+                        "mediaInfo": ef.get("mediaInfo", {}),
+                        "originalFilePath": ef.get("originalFilePath")
+                    }
+                    for ef in episode_files
+                ]
+            }
+            
+        elif name == "delete_sonarr_series":
+            series_id = arguments["id"]
+            delete_files = arguments.get("deleteFiles", False)
+            add_import_list_exclusion = arguments.get("addImportListExclusion", False)
+            
+            # Delete series from Sonarr
+            params = {
+                "deleteFiles": delete_files,
+                "addImportListExclusion": add_import_list_exclusion
+            }
+            
+            # Sonarr uses DELETE method with query parameters
+            base_url = get_sonarr_url(config)
+            api_key = config["sonarrConfig"]["apiKey"]
+            headers = {"X-Api-Key": api_key}
+            url = f"{base_url}/series/{series_id}"
+            
+            try:
+                response = requests.delete(url, headers=headers, params=params, timeout=30)
+                response.raise_for_status()
+                
+                result = {
+                    "success": True,
+                    "message": f"Series with ID {series_id} has been deleted from Sonarr",
+                    "deleteFiles": delete_files,
+                    "addImportListExclusion": add_import_list_exclusion
+                }
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Failed to delete series: {e}")
+                raise
+            
+        # Extended tools handlers
+        elif name == "get_download_queue":
+            result = handle_download_queue(config, arguments["service"], 
+                                         arguments.get("includeUnknownItems", False))
+            
+        elif name == "remove_from_queue":
+            result = handle_remove_from_queue(config, arguments["service"], arguments["id"],
+                                            arguments.get("removeFromClient", True),
+                                            arguments.get("blocklist", False))
+            
+        elif name == "get_history":
+            result = handle_get_history(config, arguments["service"],
+                                      arguments.get("pageSize", 50),
+                                      arguments.get("page", 1),
+                                      arguments.get("eventType"))
+            
+        elif name == "manual_import":
+            result = handle_manual_import(config, arguments["service"], arguments["path"],
+                                        arguments.get("movieId"), arguments.get("seriesId"))
+            
+        elif name == "get_radarr_calendar":
+            result = handle_calendar(config, "radarr", arguments.get("start"),
+                                   arguments.get("end"), arguments.get("unmonitored", False))
+            
+        elif name == "get_sonarr_calendar":
+            result = handle_calendar(config, "sonarr", arguments.get("start"),
+                                   arguments.get("end"), arguments.get("unmonitored", False))
+            
+        elif name == "get_wanted_missing":
+            result = handle_wanted(config, arguments["service"], missing=True,
+                                 page_size=arguments.get("pageSize", 50),
+                                 page=arguments.get("page", 1),
+                                 sort_key=arguments.get("sortKey"),
+                                 sort_dir=arguments.get("sortDir"))
+            
+        elif name == "get_wanted_cutoff":
+            result = handle_wanted(config, arguments["service"], missing=False,
+                                 page_size=arguments.get("pageSize", 50),
+                                 page=arguments.get("page", 1))
+            
+        elif name == "get_system_status":
+            result = handle_system_status(config, arguments["service"])
+            
+        elif name == "get_disk_space":
+            result = handle_disk_space(config, arguments["service"])
+            
+        elif name == "execute_command":
+            result = handle_execute_command(config, arguments["service"], arguments["command"],
+                                          arguments.get("movieId"), arguments.get("seriesId"))
+            
+        elif name == "get_collections":
+            result = handle_get_collections(config, arguments.get("tmdbId"))
+            
+        elif name == "refresh_monitored":
+            result = handle_refresh_monitored(config, arguments["service"])
             
         else:
             raise ValueError(f"Unknown tool: {name}")
