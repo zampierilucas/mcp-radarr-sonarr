@@ -1,373 +1,587 @@
 #!/usr/bin/env python
-"""Main MCP server implementation for Radarr/Sonarr."""
+"""MCP server for Radarr and Sonarr integration with Claude Code."""
 
-import os
-import json
-import sys
+import asyncio
 import logging
-from typing import Optional
-import argparse
+import sys
+from typing import Any, Optional
 
-from fastmcp import FastMCP
+import mcp.server.stdio
+import mcp.types as types
+from mcp.server import NotificationOptions, Server
+from mcp.server.models import InitializationOptions
 import requests
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+from .config import load_config as load_config_module
+
+# Set up logging to stderr (never to stdout as it corrupts MCP JSON-RPC)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    stream=sys.stderr
+)
 logger = logging.getLogger(__name__)
 
-# ----------------------------------------------------------------------------- 
-# Configuration handling 
-# -----------------------------------------------------------------------------
+# Global server instance
+server = Server("radarr-sonarr-mcp")
+
 
 def load_config():
-    """Load configuration from environment variables or config file."""
-    if os.environ.get('RADARR_API_KEY') or os.environ.get('SONARR_API_KEY'):
-        logger.info("Loading configuration from environment variables...")
-        nas_ip = os.environ.get('NAS_IP', '10.0.0.23')
+    """Load configuration from config module."""
+    try:
+        config = load_config_module()
+        # Convert to internal format
         return {
-            "nasConfig": {
-                "ip": nas_ip,
-                "port": os.environ.get('RADARR_PORT', '7878')
-            },
             "radarrConfig": {
-                "apiKey": os.environ.get('RADARR_API_KEY', ''),
-                "basePath": os.environ.get('RADARR_BASE_PATH', '/api/v3'),
-                "port": os.environ.get('RADARR_PORT', '7878')
+                "apiKey": config.radarr_config.api_key,
+                "url": config.radarr_config.url,
+                "basePath": config.radarr_config.base_path
             },
             "sonarrConfig": {
-                "apiKey": os.environ.get('SONARR_API_KEY', ''),
-                "basePath": os.environ.get('SONARR_BASE_PATH', '/api/v3'),
-                "port": os.environ.get('SONARR_PORT', '8989')
-            },
-            # Optionally, include Jellyfin and Plex configuration if set in env
-            "jellyfinConfig": {
-                "baseUrl": os.environ.get('JELLYFIN_BASE_URL', ''),  # e.g., "http://10.0.0.23:5055"
-                "apiKey": os.environ.get('JELLYFIN_API_KEY', ''),
-                "userId": os.environ.get('JELLYFIN_USER_ID', '')
-            },
-            "plexConfig": {
-                "baseUrl": os.environ.get('PLEX_BASE_URL', ''),  # e.g., "http://10.0.0.23:32400"
-                "token": os.environ.get('PLEX_TOKEN', '')
-            },
-            "server": {
-                "port": int(os.environ.get('MCP_SERVER_PORT', '3000'))
+                "apiKey": config.sonarr_config.api_key,
+                "url": config.sonarr_config.url,
+                "basePath": config.sonarr_config.base_path
             }
         }
-    else:
-        config_path = 'config.json'
-        try:
-            with open(config_path, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Error loading config: {e}")
-            logger.info("Using default configuration")
-            return {
-                "nasConfig": {"ip": "10.0.0.23", "port": "7878"},
-                "radarrConfig": {"apiKey": "", "basePath": "/api/v3", "port": "7878"},
-                "sonarrConfig": {"apiKey": "", "basePath": "/api/v3", "port": "8989"},
-                "server": {"port": 3000}
-            }
+    except Exception as e:
+        logger.error(f"Failed to load config: {e}")
+        return {
+            "radarrConfig": {"apiKey": "", "url": "http://localhost:7878", "basePath": "/api/v3"},
+            "sonarrConfig": {"apiKey": "", "url": "http://localhost:8989", "basePath": "/api/v3"}
+        }
 
-# ----------------------------------------------------------------------------- 
-# API Service functions 
-# -----------------------------------------------------------------------------
 
 def get_radarr_url(config):
-    nas_ip = config["nasConfig"]["ip"]
-    port = config["radarrConfig"]["port"]
+    """Get Radarr API URL."""
+    url = config["radarrConfig"]["url"].rstrip('/')
     base_path = config["radarrConfig"]["basePath"]
-    return f"http://{nas_ip}:{port}{base_path}"
+    return f"{url}{base_path}"
+
 
 def get_sonarr_url(config):
-    nas_ip = config["nasConfig"]["ip"]
-    port = config["sonarrConfig"]["port"]
+    """Get Sonarr API URL."""
+    url = config["sonarrConfig"]["url"].rstrip('/')
     base_path = config["sonarrConfig"]["basePath"]
-    return f"http://{nas_ip}:{port}{base_path}"
+    return f"{url}{base_path}"
 
-def make_radarr_request(config, endpoint, params=None):
-    api_key = config["radarrConfig"]["apiKey"]
+
+def make_radarr_request(config, endpoint, params=None, method="GET", json_data=None):
+    """Make a request to Radarr API."""
     base_url = get_radarr_url(config)
-    url = f"{base_url}/{endpoint}"
-    if params is None:
-        params = {}
-    params['apikey'] = api_key
+    api_key = config["radarrConfig"]["apiKey"]
+    
+    if not api_key:
+        raise ValueError("Radarr API key not configured")
+    
+    headers = {"X-Api-Key": api_key, "Content-Type": "application/json"}
+    url = f"{base_url}/{endpoint.lstrip('/')}"
+    
     try:
-        response = requests.get(url, params=params, timeout=30)
+        if method.upper() == "POST":
+            response = requests.post(url, headers=headers, params=params, json=json_data, timeout=30)
+        else:
+            response = requests.get(url, headers=headers, params=params, timeout=30)
         response.raise_for_status()
         return response.json()
-    except Exception as e:
-        logger.error(f"Error making request to {url}: {e}")
-        return []
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Radarr API request failed: {e}")
+        raise
 
-def make_sonarr_request(config, endpoint, params=None):
-    api_key = config["sonarrConfig"]["apiKey"]
+
+def make_sonarr_request(config, endpoint, params=None, method="GET", json_data=None):
+    """Make a request to Sonarr API."""
     base_url = get_sonarr_url(config)
-    url = f"{base_url}/{endpoint}"
-    if params is None:
-        params = {}
-    params['apikey'] = api_key
+    api_key = config["sonarrConfig"]["apiKey"]
+    
+    if not api_key:
+        raise ValueError("Sonarr API key not configured")
+    
+    headers = {"X-Api-Key": api_key, "Content-Type": "application/json"}
+    url = f"{base_url}/{endpoint.lstrip('/')}"
+    
     try:
-        response = requests.get(url, params=params, timeout=30)
+        if method.upper() == "POST":
+            response = requests.post(url, headers=headers, params=params, json=json_data, timeout=30)
+        else:
+            response = requests.get(url, headers=headers, params=params, timeout=30)
         response.raise_for_status()
         return response.json()
-    except Exception as e:
-        logger.error(f"Error making request to {url}: {e}")
-        return []
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Sonarr API request failed: {e}")
+        raise
 
-def get_all_series(config):
-    from radarr_sonarr_mcp.services.sonarr_service import SonarrService
-    service = SonarrService(config["sonarrConfig"])
-    return service.get_all_series()
 
-# ----------------------------------------------------------------------------- 
-# Helper function to check watched status from multiple sources 
-# -----------------------------------------------------------------------------
-
-def is_watched_series(title: str, fallback: bool, config: dict, sonarr_service) -> bool:
-    """
-    Check if a series is watched using available media services.
-    Returns True if any service reports the series as watched.
-    """
-    statuses = []
-    if config.get("jellyfinConfig", {}).get("baseUrl"):
-        from radarr_sonarr_mcp.services.jellyfin_service import JellyfinService
-        jellyfin = JellyfinService(config["jellyfinConfig"])
-        try:
-            statuses.append(jellyfin.is_series_watched(title))
-        except Exception as e:
-            logger.error(f"Jellyfin check failed for {title}: {e}")
-    if config.get("plexConfig", {}).get("baseUrl"):
-        from radarr_sonarr_mcp.services.plex_service import PlexService
-        plex = PlexService(config["plexConfig"])
-        try:
-            statuses.append(plex.is_series_watched(title))
-        except Exception as e:
-            logger.error(f"Plex check failed for {title}: {e}")
-    if statuses:
-        return any(statuses)
-    # Fallback to Sonarr's own logic if no external services are configured.
-    return sonarr_service.is_series_watched(title)
-
-def is_watched_movie(title: str, config: dict) -> bool:
-    """
-    Check if a movie is watched using available media services.
-    Returns True if any service reports the movie as watched.
-    """
-    statuses = []
-    if config.get("jellyfinConfig", {}).get("baseUrl"):
-        from radarr_sonarr_mcp.services.jellyfin_service import JellyfinService
-        jellyfin = JellyfinService(config["jellyfinConfig"])
-        try:
-            # For movies, you could implement a similar method in JellyfinService.
-            statuses.append(jellyfin.is_movie_watched(title))
-        except Exception as e:
-            logger.error(f"Jellyfin movie check failed for {title}: {e}")
-    if config.get("plexConfig", {}).get("baseUrl"):
-        from radarr_sonarr_mcp.services.plex_service import PlexService
-        plex = PlexService(config["plexConfig"])
-        try:
-            statuses.append(plex.is_movie_watched(title))
-        except Exception as e:
-            logger.error(f"Plex movie check failed for {title}: {e}")
-    # If no external services configured, default to unwatched.
-    return any(statuses)
-
-# ----------------------------------------------------------------------------- 
-# MCP Server implementation 
-# -----------------------------------------------------------------------------
-
-from radarr_sonarr_mcp.services.sonarr_service import SonarrService
-
-class RadarrSonarrMCP:
-    """MCP Server for Radarr and Sonarr."""
-    
-    def __init__(self):
-        self.config = load_config()
-        self.server = FastMCP(
-            name="radarr-sonarr-mcp-server",
-            description="MCP Server for Radarr and Sonarr media management"
+@server.list_tools()
+async def handle_list_tools() -> list[types.Tool]:
+    """List available tools."""
+    return [
+        types.Tool(
+            name="get_radarr_movies",
+            description="Get list of movies from Radarr",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "monitored": {
+                        "type": "boolean",
+                        "description": "Filter by monitored status"
+                    },
+                    "downloaded": {
+                        "type": "boolean", 
+                        "description": "Filter by downloaded status"
+                    }
+                },
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="get_sonarr_series",
+            description="Get list of TV series from Sonarr",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "monitored": {
+                        "type": "boolean",
+                        "description": "Filter by monitored status"
+                    },
+                    "downloaded": {
+                        "type": "boolean",
+                        "description": "Filter by downloaded status" 
+                    }
+                },
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="search_radarr_movies",
+            description="Search for movies in Radarr",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "term": {
+                        "type": "string",
+                        "description": "Search term for movie title"
+                    }
+                },
+                "required": ["term"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="search_sonarr_series",
+            description="Search for TV series in Sonarr",  
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "term": {
+                        "type": "string",
+                        "description": "Search term for series title"
+                    }
+                },
+                "required": ["term"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="add_radarr_movie",
+            description="Add a movie to Radarr library and request download",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tmdbId": {
+                        "type": "integer",
+                        "description": "TMDB ID of the movie to add"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Movie title"
+                    },
+                    "year": {
+                        "type": "integer",
+                        "description": "Release year"
+                    },
+                    "qualityProfileId": {
+                        "type": "integer",
+                        "description": "Quality profile ID (optional, uses default if not provided)",
+                        "default": 1
+                    },
+                    "rootFolderPath": {
+                        "type": "string",
+                        "description": "Root folder path (optional, uses default if not provided)"
+                    },
+                    "monitored": {
+                        "type": "boolean",
+                        "description": "Whether to monitor the movie",
+                        "default": True
+                    },
+                    "searchForMovie": {
+                        "type": "boolean", 
+                        "description": "Whether to search for the movie immediately",
+                        "default": True
+                    }
+                },
+                "required": ["tmdbId", "title", "year"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="add_sonarr_series",
+            description="Add a TV series to Sonarr library and request download",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tvdbId": {
+                        "type": "integer",
+                        "description": "TVDB ID of the series to add"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Series title"
+                    },
+                    "year": {
+                        "type": "integer",
+                        "description": "First air year"
+                    },
+                    "qualityProfileId": {
+                        "type": "integer",
+                        "description": "Quality profile ID (optional, uses default if not provided)",
+                        "default": 1
+                    },
+                    "rootFolderPath": {
+                        "type": "string",
+                        "description": "Root folder path (optional, uses default if not provided)"
+                    },
+                    "monitored": {
+                        "type": "boolean",
+                        "description": "Whether to monitor the series",
+                        "default": True
+                    },
+                    "searchForMissingEpisodes": {
+                        "type": "boolean",
+                        "description": "Whether to search for missing episodes immediately", 
+                        "default": True
+                    },
+                    "seasonFolder": {
+                        "type": "boolean",
+                        "description": "Whether to use season folders",
+                        "default": True
+                    }
+                },
+                "required": ["tvdbId", "title", "year"],
+                "additionalProperties": False
+            }
         )
-        self.sonarr_service = SonarrService(self.config["sonarrConfig"])
-        self._register_tools()
-        self._register_resources()
-        # Optionally, register prompts.
+    ]
+
+
+@server.call_tool()
+async def handle_call_tool(
+    name: str, arguments: dict[str, Any] | None
+) -> list[types.TextContent]:
+    """Handle tool calls."""
+    if arguments is None:
+        arguments = {}
     
-    def _register_tools(self):
-        @self.server.tool()
-        def get_available_series(year: Optional[int] = None,
-                                 downloaded: Optional[bool] = None,
-                                 watched: Optional[bool] = None,
-                                 actors: Optional[str] = None) -> dict:
-            """
-            Get a list of available TV series with optional filters.
-            Watched status is determined using Plex and/or Jellyfin; if either reports watched, the series is considered watched.
-            """
-            all_series = get_all_series(self.config)  # List of Series objects
-            filtered_series = all_series
+    config = load_config()
+    
+    try:
+        if name == "get_radarr_movies":
+            movies = make_radarr_request(config, "movie")
             
-            if year is not None:
-                filtered_series = [s for s in filtered_series if s.year == year]
+            # Apply filters
+            if arguments.get("monitored") is not None:
+                movies = [m for m in movies if m.get("monitored") == arguments["monitored"]]
             
-            if downloaded is not None:
-                filtered_series = [
-                    s for s in filtered_series 
-                    if (s.statistics and s.statistics.episode_file_count > 0) == downloaded
-                ]
+            if arguments.get("downloaded") is not None:
+                downloaded_filter = arguments["downloaded"]
+                movies = [m for m in movies if (m.get("hasFile", False)) == downloaded_filter]
             
-            if watched is not None:
-                if watched:
-                    filtered_series = [
-                        s for s in filtered_series 
-                        if is_watched_series(s.title, False, self.config, self.sonarr_service)
-                    ]
-                else:
-                    filtered_series = [
-                        s for s in filtered_series 
-                        if not is_watched_series(s.title, False, self.config, self.sonarr_service)
-                    ]
-            
-            if actors:
-                filtered_series = [
-                    s for s in filtered_series 
-                    if s.data.get("credits") and any(
-                        actors.lower() in cast.get("name", "").lower()
-                        for cast in s.data.get("credits", {}).get("cast", [])
-                    )
-                ]
-            
-            return {
-                "count": len(filtered_series),
-                "series": [
-                    {
-                        "id": s.id,
-                        "title": s.title,
-                        "year": s.year,
-                        "overview": s.overview,
-                        "status": s.status,
-                        "network": s.network,
-                        "genres": s.genres,
-                        "watched": is_watched_series(s.title, False, self.config, self.sonarr_service)
-                    }
-                    for s in filtered_series
-                ]
-            }
-        
-        @self.server.tool()
-        def lookup_series(term: str) -> dict:
-            service = SonarrService(self.config["sonarrConfig"])
-            results = service.lookup_series(term)
-            return {
-                "count": len(results),
-                "series": [
-                    {
-                        "id": s.id,
-                        "title": s.title,
-                        "year": s.year,
-                        "overview": s.overview
-                    }
-                    for s in results
-                ]
-            }
-        
-        # Similarly, for movies you can define a tool:
-        @self.server.tool()
-        def get_available_movies(year: Optional[int] = None,
-                                 downloaded: Optional[bool] = None,
-                                 watched: Optional[bool] = None,
-                                 actors: Optional[str] = None) -> dict:
-            """
-            Get a list of all available movies with optional filters.
-            Watched status is determined using Plex and/or Jellyfin.
-            """
-            # For movies, assume you have a function get_all_movies similar to get_all_series.
-            from radarr_sonarr_mcp.services.radarr_service import RadarrService
-            # You would need to instantiate a RadarrService and fetch movies.
-            radarr_service = RadarrService(self.config["radarrConfig"])
-            all_movies = radarr_service.get_all_movies()  # Assuming this returns a list of dicts
-            filtered_movies = all_movies
-            
-            if year is not None:
-                filtered_movies = [m for m in filtered_movies if m.get("year") == year]
-            
-            if downloaded is not None:
-                filtered_movies = [m for m in filtered_movies if m.get("hasFile") == downloaded]
-            
-            if watched is not None:
-                if watched:
-                    filtered_movies = [
-                        m for m in filtered_movies
-                        if is_watched_movie(m.get("title", ""), self.config)
-                    ]
-                else:
-                    filtered_movies = [
-                        m for m in filtered_movies
-                        if not is_watched_movie(m.get("title", ""), self.config)
-                    ]
-            
-            if actors:
-                filtered_movies = [
-                    m for m in filtered_movies
-                    if m.get("credits") and any(
-                        actors.lower() in cast.get("name", "").lower()
-                        for cast in m.get("credits", {}).get("cast", [])
-                    )
-                ]
-            
-            return {
-                "count": len(filtered_movies),
+            result = {
+                "count": len(movies),
                 "movies": [
                     {
                         "id": m.get("id"),
                         "title": m.get("title"),
                         "year": m.get("year"),
-                        "overview": m.get("overview"),
-                        "hasFile": m.get("hasFile"),
+                        "monitored": m.get("monitored"),
+                        "hasFile": m.get("hasFile", False),
                         "status": m.get("status"),
-                        "genres": m.get("genres", []),
-                        "watched": is_watched_movie(m.get("title", ""), self.config)
+                        "overview": m.get("overview", "")[:200] + "..." if len(m.get("overview", "")) > 200 else m.get("overview", "")
                     }
-                    for m in filtered_movies
+                    for m in movies[:50]  # Limit to 50 results
                 ]
             }
-    
-    def _register_resources(self):
-        @self.server.resource("http://example.com/series", description="TV series collection from Sonarr")
-        def series() -> dict:
-            series_list = get_all_series(self.config)
-            return {
-                "count": len(series_list),
+            
+        elif name == "get_sonarr_series":
+            series = make_sonarr_request(config, "series")
+            
+            # Apply filters  
+            if arguments.get("monitored") is not None:
+                series = [s for s in series if s.get("monitored") == arguments["monitored"]]
+            
+            if arguments.get("downloaded") is not None:
+                downloaded_filter = arguments["downloaded"]
+                series = [s for s in series if (s.get("statistics", {}).get("episodeFileCount", 0) > 0) == downloaded_filter]
+            
+            result = {
+                "count": len(series),
                 "series": [
                     {
-                        "id": s.id,
-                        "title": s.title,
-                        "year": s.year
+                        "id": s.get("id"),
+                        "title": s.get("title"),
+                        "year": s.get("year"),
+                        "monitored": s.get("monitored"),
+                        "status": s.get("status"),
+                        "episodeCount": s.get("statistics", {}).get("episodeCount", 0),
+                        "episodeFileCount": s.get("statistics", {}).get("episodeFileCount", 0),
+                        "overview": s.get("overview", "")[:200] + "..." if len(s.get("overview", "")) > 200 else s.get("overview", "")
                     }
-                    for s in series_list
+                    for s in series[:50]  # Limit to 50 results
                 ]
             }
-        @self.server.resource("http://example.com/movies", description="Movie collection from Radarr")
-        def movies() -> dict:
-            from radarr_sonarr_mcp.services.radarr_service import RadarrService
-            radarr_service = RadarrService(self.config["radarrConfig"])
-            movies_list = radarr_service.get_all_movies()  # Assuming list of dicts
-            return {
-                "count": len(movies_list),
+            
+        elif name == "search_radarr_movies":
+            term = arguments["term"]
+            movies = make_radarr_request(config, "movie/lookup", {"term": term})
+            
+            result = {
+                "count": len(movies),
+                "movies": [
+                    {
+                        "title": m.get("title"),
+                        "year": m.get("year"),
+                        "tmdbId": m.get("tmdbId"),
+                        "imdbId": m.get("imdbId"),
+                        "overview": m.get("overview", "")[:200] + "..." if len(m.get("overview", "")) > 200 else m.get("overview", "")
+                    }
+                    for m in movies[:20]  # Limit to 20 results
+                ]
+            }
+            
+        elif name == "search_sonarr_series":
+            term = arguments["term"]
+            series = make_sonarr_request(config, "series/lookup", {"term": term})
+            
+            result = {
+                "count": len(series),
+                "series": [
+                    {
+                        "title": s.get("title"),
+                        "year": s.get("year"),
+                        "tvdbId": s.get("tvdbId"),
+                        "imdbId": s.get("imdbId"),
+                        "overview": s.get("overview", "")[:200] + "..." if len(s.get("overview", "")) > 200 else s.get("overview", "")
+                    }
+                    for s in series[:20]  # Limit to 20 results
+                ]
+            }
+            
+        elif name == "add_radarr_movie":
+            tmdb_id = arguments["tmdbId"]
+            title = arguments["title"]
+            year = arguments["year"]
+            
+            # Get default quality profile and root folder if not provided
+            quality_profile_id = arguments.get("qualityProfileId")
+            root_folder_path = arguments.get("rootFolderPath")
+            
+            if not quality_profile_id:
+                # Get first available quality profile
+                profiles = make_radarr_request(config, "qualityprofile")
+                quality_profile_id = profiles[0]["id"] if profiles else 1
+                
+            if not root_folder_path:
+                # Get first available root folder
+                root_folders = make_radarr_request(config, "rootfolder")
+                root_folder_path = root_folders[0]["path"] if root_folders else "/movies"
+            
+            # Prepare movie data for adding
+            movie_data = {
+                "title": title,
+                "year": year,
+                "tmdbId": tmdb_id,
+                "qualityProfileId": quality_profile_id,
+                "rootFolderPath": root_folder_path,
+                "monitored": arguments.get("monitored", True),
+                "addOptions": {
+                    "searchForMovie": arguments.get("searchForMovie", True),
+                    "monitor": "movieOnly"
+                }
+            }
+            
+            # Add movie to Radarr
+            added_movie = make_radarr_request(config, "movie", method="POST", json_data=movie_data)
+            
+            result = {
+                "success": True,
+                "message": f"Movie '{title} ({year})' has been added to Radarr",
+                "movie": {
+                    "id": added_movie.get("id"),
+                    "title": added_movie.get("title"),
+                    "year": added_movie.get("year"),
+                    "tmdbId": added_movie.get("tmdbId"),
+                    "monitored": added_movie.get("monitored"),
+                    "hasFile": added_movie.get("hasFile", False),
+                    "status": added_movie.get("status")
+                }
+            }
+            
+        elif name == "add_sonarr_series":
+            tvdb_id = arguments["tvdbId"]
+            title = arguments["title"]
+            year = arguments["year"]
+            
+            # Get default quality profile and root folder if not provided
+            quality_profile_id = arguments.get("qualityProfileId")
+            root_folder_path = arguments.get("rootFolderPath")
+            
+            if not quality_profile_id:
+                # Get first available quality profile
+                profiles = make_sonarr_request(config, "qualityprofile")
+                quality_profile_id = profiles[0]["id"] if profiles else 1
+                
+            if not root_folder_path:
+                # Get first available root folder
+                root_folders = make_sonarr_request(config, "rootfolder")
+                root_folder_path = root_folders[0]["path"] if root_folders else "/tv"
+            
+            # Prepare series data for adding
+            series_data = {
+                "title": title,
+                "year": year,
+                "tvdbId": tvdb_id,
+                "qualityProfileId": quality_profile_id,
+                "rootFolderPath": root_folder_path,
+                "monitored": arguments.get("monitored", True),
+                "seasonFolder": arguments.get("seasonFolder", True),
+                "addOptions": {
+                    "searchForMissingEpisodes": arguments.get("searchForMissingEpisodes", True),
+                    "monitor": "all"
+                }
+            }
+            
+            # Add series to Sonarr
+            added_series = make_sonarr_request(config, "series", method="POST", json_data=series_data)
+            
+            result = {
+                "success": True,
+                "message": f"Series '{title} ({year})' has been added to Sonarr",
+                "series": {
+                    "id": added_series.get("id"),
+                    "title": added_series.get("title"),
+                    "year": added_series.get("year"),
+                    "tvdbId": added_series.get("tvdbId"),
+                    "monitored": added_series.get("monitored"),
+                    "status": added_series.get("status"),
+                    "seasonCount": len(added_series.get("seasons", []))
+                }
+            }
+            
+        else:
+            raise ValueError(f"Unknown tool: {name}")
+            
+        return [types.TextContent(type="text", text=str(result))]
+        
+    except Exception as e:
+        logger.error(f"Tool call failed: {e}")
+        return [types.TextContent(type="text", text=f"Error: {str(e)}")]
+
+
+@server.list_resources()
+async def handle_list_resources() -> list[types.Resource]:
+    """List available resources."""
+    return [
+        types.Resource(
+            uri="radarr://movies",
+            name="Radarr Movies",
+            description="List of movies in Radarr",
+            mimeType="application/json",
+        ),
+        types.Resource(
+            uri="sonarr://series", 
+            name="Sonarr Series",
+            description="List of TV series in Sonarr",
+            mimeType="application/json",
+        )
+    ]
+
+
+@server.read_resource()
+async def handle_read_resource(uri: str) -> str:
+    """Read a resource."""
+    config = load_config()
+    
+    # Convert URI to string if it's not already
+    uri_str = str(uri)
+    logger.info(f"Reading resource: {uri_str}")
+    
+    try:
+        if uri_str == "radarr://movies":
+            logger.info("Handling radarr://movies resource")
+            movies = make_radarr_request(config, "movie")
+            result = {
+                "count": len(movies),
                 "movies": [
                     {
                         "id": m.get("id"),
                         "title": m.get("title"),
-                        "year": m.get("year")
+                        "year": m.get("year"),
+                        "monitored": m.get("monitored"),
+                        "hasFile": m.get("hasFile", False),
+                        "status": m.get("status")
                     }
-                    for m in movies_list
+                    for m in movies
                 ]
             }
-    
-    def run(self):
-        port = self.config["server"]["port"]
-        logger.info(f"Starting Radarr-Sonarr MCP Server on port {port}")
-        logger.info(f"Connect Claude Desktop to: http://localhost:{port}")
-        self.server.run()
+            import json
+            return json.dumps(result, indent=2)
+            
+        elif uri_str == "sonarr://series":
+            logger.info("Handling sonarr://series resource")
+            series = make_sonarr_request(config, "series")
+            result = {
+                "count": len(series),
+                "series": [
+                    {
+                        "id": s.get("id"),
+                        "title": s.get("title"),
+                        "year": s.get("year"),
+                        "monitored": s.get("monitored"),
+                        "status": s.get("status"),
+                        "episodeCount": s.get("statistics", {}).get("episodeCount", 0),
+                        "episodeFileCount": s.get("statistics", {}).get("episodeFileCount", 0)
+                    }
+                    for s in series
+                ]
+            }
+            import json
+            return json.dumps(result, indent=2)
+            
+        else:
+            logger.error(f"Unknown resource requested: {uri_str}")
+            raise ValueError(f"Unknown resource: {uri_str}")
+            
+    except Exception as e:
+        logger.error(f"Resource read failed: {e}")
+        return f"Error: {str(e)}"
+
+
+async def main():
+    """Main entry point for the MCP server."""
+    # Run the server using stdin/stdout streams
+    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
+        await server.run(
+            read_stream,
+            write_stream,
+            InitializationOptions(
+                server_name="radarr-sonarr-mcp",
+                server_version="0.1.0",
+                capabilities=server.get_capabilities(
+                    notification_options=NotificationOptions(),
+                    experimental_capabilities={},
+                ),
+            ),
+        )
+
 
 if __name__ == "__main__":
-    server = RadarrSonarrMCP()
-    server.run()
+    asyncio.run(main())

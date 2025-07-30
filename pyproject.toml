@@ -14,7 +14,7 @@ classifiers = [
 ]
 scripts = { radarr-sonarr-mcp = "radarr_sonarr_mcp.cli:main" }
 dependencies = [
-  "mcp>=0.1.0",
+  "mcp>=1.0.0",
   "requests>=2.28.0",
   "pydantic>=2.0.0"
 ]

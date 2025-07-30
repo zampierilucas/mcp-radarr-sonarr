@@ -1,20 +1,21 @@
 # Radarr and Sonarr MCP Server
 
-A Python-based Model Context Protocol (MCP) server that provides AI assistants like Claude with access to your Radarr (movies) and Sonarr (TV series) data.
+A Python-based Model Context Protocol (MCP) server that provides Claude Code with access to your Radarr (movies) and Sonarr (TV series) data.
 
 ## Overview
 
-This MCP server allows AI assistants to query your movie and TV show collection via Radarr and Sonarr APIs. Built with FastMCP, it implements the standardized protocol for AI context that Claude Desktop and other MCP-compatible clients can use.
+This MCP server allows Claude Code to query your movie and TV show collection via Radarr and Sonarr APIs. Built with the standard MCP protocol, it uses STDIO transport for seamless integration with Claude Code.
 
 ## Features
 
-- **Native MCP Implementation**: Built with FastMCP for seamless AI integration
+- **Standard MCP Implementation**: Built with the official MCP Python SDK
+- **Claude Code Compatible**: Uses STDIO transport for direct integration
 - **Radarr Integration**: Access your movie collection
 - **Sonarr Integration**: Access your TV show and episode data
-- **Rich Filtering**: Filter by year, watched status, actors, and more
-- **Claude Desktop Compatible**: Works seamlessly with Claude's MCP client
+- **Rich Filtering**: Filter by monitored status, download status, and more
+- **Separate URL Configuration**: Support for different servers/ports per service
 - **Easy Setup**: Interactive configuration wizard
-- **Well-tested**: Comprehensive test suite for reliability
+- **No HTTP Server Required**: Uses STDIO transport for better security and performance
 
 ## Installation
 
@@ -23,7 +24,7 @@ This MCP server allows AI assistants to query your movie and TV show collection 
 1. Clone this repository:
    ```bash
    git clone https://github.com/yourusername/radarr-sonarr-mcp.git
-   cd radarr-sonarr-mcp-python
+   cd radarr-sonarr-mcp
    ```
 
 2. Install the package:
@@ -43,92 +44,134 @@ pip install radarr-sonarr-mcp
    ```bash
    radarr-sonarr-mcp configure
    ```
-   Follow the prompts to enter your Radarr/Sonarr API keys and other settings.
+   Follow the prompts to enter your Radarr/Sonarr URLs and API keys.
 
-2. Start the server:
-   ```bash
-   radarr-sonarr-mcp start
-   ```
-
-3. Connect Claude Desktop:
-   - In Claude Desktop, go to Settings > MCP Servers
-   - Add a new server with URL: `http://localhost:3000` (or your configured port)
+2. Add to Claude Code configuration:
+   Create or edit your Claude Code MCP configuration file and add this server.
 
 ## Configuration
 
 The configuration wizard will guide you through setting up:
 
-- NAS/Server IP address
-- Radarr API key and port
-- Sonarr API key and port
-- MCP server port
+- Radarr URL (complete URL like `http://192.168.1.100:7878`)
+- Radarr API key and base path
+- Sonarr URL (complete URL like `http://192.168.1.100:8989`) 
+- Sonarr API key and base path
 
-You can also manually edit the `config.json` file:
+### Manual Configuration
+
+You can also manually edit the configuration file at `~/.config/radarr-sonarr-mcp/config.json`:
 
 ```json
 {
-  "nasConfig": {
-    "ip": "10.0.0.23",
-    "port": "7878"
+  "radarr_config": {
+    "api_key": "YOUR_RADARR_API_KEY",
+    "url": "http://192.168.1.100:7878",
+    "base_path": "/api/v3"
   },
-  "radarrConfig": {
-    "apiKey": "YOUR_RADARR_API_KEY",
-    "basePath": "/api/v3",
-    "port": "7878"
-  },
-  "sonarrConfig": {
-    "apiKey": "YOUR_SONARR_API_KEY",
-    "basePath": "/api/v3",
-    "port": "8989"
-  },
-  "server": {
-    "port": 3000
+  "sonarr_config": {
+    "api_key": "YOUR_SONARR_API_KEY", 
+    "url": "http://192.168.1.100:8989",
+    "base_path": "/api/v3"
+  }
+}
+```
+
+### Environment Variables
+
+You can also configure via environment variables:
+
+```bash
+export RADARR_URL="http://192.168.1.100:7878"
+export RADARR_API_KEY="your_radarr_api_key"
+export SONARR_URL="http://192.168.1.100:8989"
+export SONARR_API_KEY="your_sonarr_api_key"
+```
+
+## Claude Code Integration
+
+To use this MCP server with Claude Code, add it to your MCP configuration:
+
+### Method 1: Using Configuration File
+
+Add to your Claude Code MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "radarr-sonarr": {
+      "command": "python",
+      "args": ["-m", "radarr_sonarr_mcp.server"],
+      "env": {
+        "RADARR_URL": "http://your-radarr-server:7878",
+        "RADARR_API_KEY": "your_radarr_api_key_here",
+        "SONARR_URL": "http://your-sonarr-server:8989", 
+        "SONARR_API_KEY": "your_sonarr_api_key_here"
+      }
+    }
+  }
+}
+```
+
+### Method 2: Using Installed Configuration
+
+If you've run `radarr-sonarr-mcp configure`, you can use:
+
+```json
+{
+  "mcpServers": {
+    "radarr-sonarr": {
+      "command": "python",
+      "args": ["-m", "radarr_sonarr_mcp.server"]
+    }
   }
 }
 ```
 
 ## Available MCP Tools
 
-This server provides the following tools to Claude:
+This server provides the following tools to Claude Code:
 
 ### Movies
-- `get_available_movies` - Get a list of movies with optional filters
-- `lookup_movie` - Search for a movie by title
-- `get_movie_details` - Get detailed information about a specific movie
+- `get_radarr_movies` - Get a list of movies with optional filters (monitored, downloaded)
+- `search_radarr_movies` - Search for movies by title
+- `add_radarr_movie` - Add a movie to Radarr library and request download
 
-### Series
-- `get_available_series` - Get a list of TV series with optional filters
-- `lookup_series` - Search for a TV series by title
-- `get_series_details` - Get detailed information about a specific series
-- `get_series_episodes` - Get episodes for a specific series
+### TV Series  
+- `get_sonarr_series` - Get a list of TV series with optional filters (monitored, downloaded)
+- `search_sonarr_series` - Search for TV series by title
+- `add_sonarr_series` - Add a TV series to Sonarr library and request download
 
 ### Resources
 
-The server also provides standard MCP resources:
+The server also provides MCP resources:
 
-- `/movies` - Browse all available movies
-- `/series` - Browse all available TV series
+- `radarr://movies` - Browse all movies in Radarr
+- `sonarr://series` - Browse all TV series in Sonarr
 
 ### Filtering Options
 
-Most tools support various filtering options:
+Tools support these filtering options:
 
-- `year` - Filter by release year
-- `watched` - Filter by watched status (true/false)
+- `monitored` - Filter by monitored status (true/false)
 - `downloaded` - Filter by download status (true/false)
-- `watchlist` - Filter by watchlist status (true/false)
-- `actors` - Filter by actor/cast name
-- `actresses` - Filter by actress name (movies only)
 
-## Example Queries for Claude
+## Example Queries for Claude Code
 
-Once your MCP server is connected to Claude Desktop, you can ask questions like:
+Once your MCP server is connected to Claude Code, you can ask questions like:
 
-- "What sci-fi movies from 2023 do I have?"
-- "Show me TV shows starring Pedro Pascal"
-- "Do I have any unwatched episodes of The Mandalorian?"
-- "Find movies with Tom Hanks that I haven't watched yet"
-- "How many episodes of Stranger Things do I have downloaded?"
+### Browsing and Searching
+- "What movies do I have in Radarr?"
+- "Show me unmonitored TV shows in Sonarr"
+- "Find movies that haven't been downloaded yet"  
+- "Search for 'Inception' in my movie collection"
+- "How many TV series do I have downloaded?"
+
+### Adding Movies and TV Shows
+- "Search for the movie 'Dune' and add it to my library"
+- "Find 'The Mandalorian' and add it to Sonarr with automatic download"
+- "Add 'Avatar: The Way of Water' to Radarr and start downloading"
+- "Search for 'Stranger Things' and add all seasons to my library"
 
 ## Finding API Keys
 
@@ -149,8 +192,10 @@ Once your MCP server is connected to Claude Desktop, you can ask questions like:
 The package provides a command-line interface:
 
 - `radarr-sonarr-mcp configure` - Run configuration wizard
-- `radarr-sonarr-mcp start` - Start the MCP server
+- `radarr-sonarr-mcp start` - Start the MCP server (for testing only)
 - `radarr-sonarr-mcp status` - Show the current configuration
+
+**Note:** Claude Code will automatically start the MCP server when needed. The `start` command is mainly for testing purposes.
 
 ## Development
 
@@ -169,23 +214,33 @@ pytest
 pytest --cov=radarr_sonarr_mcp
 ```
 
-### Local Development
+### Testing the MCP Server
 
-For quick development and testing:
+You can test the MCP server directly:
 
 ```bash
-# Run directly without installation
-python run.py
+# Test MCP protocol communication
+echo '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test", "version": "1.0"}}}' | python -m radarr_sonarr_mcp.server
 ```
 
 ## Requirements
 
-- Python 3.7+
-- FastMCP
+- Python 3.10+
+- MCP SDK
 - Requests
 - Pydantic
 
-## Notes
+## Architecture
 
-- The watched/watchlist status functionality assumes these are tracked using specific mechanisms in Radarr/Sonarr. You may need to adapt this to your specific setup.
-- For security reasons, it's recommended to run this server only on your local network.
+This MCP server uses:
+
+- **Transport**: STDIO (Standard Input/Output) for Claude Code integration
+- **Protocol**: Standard MCP (Model Context Protocol)
+- **No HTTP Server**: Direct communication via STDIO for better security and performance
+
+## Security Notes
+
+- The server communicates with Claude Code via STDIO, eliminating the need for HTTP endpoints
+- API keys are stored locally in your configuration file
+- All communication happens locally on your machine
+- For additional security, ensure your Radarr/Sonarr instances are properly secured

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "radarr-sonarr": {
+      "command": "python",
+      "args": ["-m", "radarr_sonarr_mcp.server"],
+      "env": {
+        "RADARR_URL": "http://your-radarr-server:7878",
+        "RADARR_API_KEY": "your_radarr_api_key_here",
+        "SONARR_URL": "http://your-sonarr-server:8989",
+        "SONARR_API_KEY": "your_sonarr_api_key_here"
+      }
+    }
+  }
+}
