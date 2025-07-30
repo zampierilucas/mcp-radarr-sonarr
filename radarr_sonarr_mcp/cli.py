@@ -67,9 +67,12 @@ def configure():
 
 
 def start(config_path=None):
-    """Start the MCP server."""
+    """Start the MCP server (for development/testing only - Claude Code starts it automatically)."""
     import subprocess
     import sys
+    
+    logging.info("Note: Claude Code starts the MCP server automatically.")
+    logging.info("This command is only for development/testing purposes.")
     
     # Run the server module directly
     cmd = [sys.executable, "-m", "radarr_sonarr_mcp.server"]

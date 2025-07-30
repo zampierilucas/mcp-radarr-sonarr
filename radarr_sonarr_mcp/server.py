@@ -512,11 +512,9 @@ async def handle_read_resource(uri: str) -> str:
     
     # Convert URI to string if it's not already
     uri_str = str(uri)
-    logger.info(f"Reading resource: {uri_str}")
     
     try:
         if uri_str == "radarr://movies":
-            logger.info("Handling radarr://movies resource")
             movies = make_radarr_request(config, "movie")
             result = {
                 "count": len(movies),
@@ -536,7 +534,6 @@ async def handle_read_resource(uri: str) -> str:
             return json.dumps(result, indent=2)
             
         elif uri_str == "sonarr://series":
-            logger.info("Handling sonarr://series resource")
             series = make_sonarr_request(config, "series")
             result = {
                 "count": len(series),
@@ -557,7 +554,6 @@ async def handle_read_resource(uri: str) -> str:
             return json.dumps(result, indent=2)
             
         else:
-            logger.error(f"Unknown resource requested: {uri_str}")
             raise ValueError(f"Unknown resource: {uri_str}")
             
     except Exception as e:

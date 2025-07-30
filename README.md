@@ -199,21 +199,6 @@ The package provides a command-line interface:
 
 ## Development
 
-### Running Tests
-
-To run the test suite:
-
-```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Run tests with coverage
-pytest --cov=radarr_sonarr_mcp
-```
-
 ### Testing the MCP Server
 
 You can test the MCP server directly:
