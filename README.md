@@ -7,13 +7,13 @@ Based on the original work by [hannesrudolph/mcp-server-radarr-sonarr](https://g
 ## Installation
 
 ```bash
-# From source
-git clone https://github.com/yourusername/radarr-sonarr-mcp.git
-cd radarr-sonarr-mcp
-pip install -e .
-
-# Or using pip (coming soon)
+# From PyPI
 pip install radarr-sonarr-mcp
+
+# From source
+git clone https://github.com/zampierilucas/mcp-radarr-sonarr.git
+cd mcp-radarr-sonarr
+pip install -e .
 ```
 
 ## Quick Start

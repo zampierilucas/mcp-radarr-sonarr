@@ -1,22 +1,50 @@
 [project]
 name = "radarr-sonarr-mcp"
-version = "0.1.0"
-description = "MCP Server for Radarr and Sonarr media management"
+version = "0.2.0"
+description = "MCP Server for Radarr and Sonarr media management with comprehensive API access"
 authors = [
-  { name = "Berry", email = "berry@berry.com" }
+  { name = "Lucas Zampieri", email = "lczampier@gmail.com" },
+  { name = "Hannes Rudolph", email = "hannes@rudolph.com" }
+]
+maintainers = [
+  { name = "Lucas Zampieri", email = "lczampier@gmail.com" }
 ]
 requires-python = ">=3.10"
 readme = "README.md"
+license = { text = "MIT" }
+keywords = ["mcp", "radarr", "sonarr", "media", "claude", "api"]
 classifiers = [
-  "Programming Language :: Python :: 3",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
-  "Operating System :: OS Independent"
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Home Automation"
 ]
 scripts = { radarr-sonarr-mcp = "radarr_sonarr_mcp.cli:main" }
 dependencies = [
   "mcp>=1.0.0",
   "requests>=2.28.0",
   "pydantic>=2.0.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/zampierilucas/mcp-radarr-sonarr"
+Repository = "https://github.com/zampierilucas/mcp-radarr-sonarr"
+Issues = "https://github.com/zampierilucas/mcp-radarr-sonarr/issues"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0.0",
+  "pytest-asyncio>=0.20.0",
+  "black>=22.0.0",
+  "flake8>=5.0.0",
+  "mypy>=1.0.0"
 ]
 
 [build-system]

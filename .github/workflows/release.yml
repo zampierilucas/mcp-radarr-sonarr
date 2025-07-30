@@ -1,0 +1,42 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: |
+          ## What's New
+          
+          See [CHANGELOG.md](https://github.com/zampierilucas/mcp-radarr-sonarr/blob/${{ github.ref }}/CHANGELOG.md) for details.
+          
+          ## Installation
+          
+          ```bash
+          pip install radarr-sonarr-mcp==${{ github.ref_name }}
+          ```
+          
+          ## Configuration
+          
+          ```bash
+          radarr-sonarr-mcp configure
+          ```
+        draft: false
+        prerelease: false
