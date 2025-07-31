@@ -24,6 +24,13 @@ pip install -e .
    ```
 
 2. Add to Claude Code MCP configuration:
+   
+   Using the CLI (recommended):
+   ```bash
+   claude mcp add radarr-sonarr -- python -m radarr_sonarr_mcp.server
+   ```
+   
+   Or manually edit your MCP config:
    ```json
    {
      "mcpServers": {
