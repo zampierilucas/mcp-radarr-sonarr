@@ -542,6 +542,7 @@ async def handle_call_tool(
                         "id": m.get("id"),
                         "title": m.get("title"),
                         "year": m.get("year"),
+                        "tmdbId": m.get("tmdbId"),
                         "monitored": m.get("monitored"),
                         "hasFile": m.get("hasFile", False),
                         "status": m.get("status"),

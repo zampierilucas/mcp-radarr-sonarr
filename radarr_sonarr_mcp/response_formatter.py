@@ -49,13 +49,15 @@ def _format_media_list(result: Dict[str, Any], tool_name: str) -> str:
     for item in items:
         title = item.get("title", "Unknown")
         year = item.get("year", "Unknown")
+        item_id = item.get("id", "?")
         
         if media_type == "series":
             ep_count = item.get("episodeFileCount", 0)
             total_eps = item.get("episodeCount", 0)
-            lines.append(f"  {title} ({year}) - {ep_count}/{total_eps}")
+            lines.append(f"  [{item_id}] {title} ({year}) - {ep_count}/{total_eps}")
         else:
-            lines.append(f"  {title} ({year})")
+            tmdb_id = item.get("tmdbId", "?")
+            lines.append(f"  [{item_id}] {title} ({year}) - TMDB: {tmdb_id}")
     
     if count > len(items):
         lines.append(f"  ... {count - len(items)} more")
