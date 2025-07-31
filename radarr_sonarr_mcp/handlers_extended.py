@@ -7,62 +7,56 @@ from typing import Any, Dict
 logger = logging.getLogger(__name__)
 
 
-def handle_download_queue(config: Dict[str, Any], service: str, include_unknown: bool = False) -> Dict[str, Any]:
+def handle_download_queue(config: Dict[str, Any], service: str, include_unknown: bool = False) -> str:
     """Handle get_download_queue requests."""
     from .server import make_radarr_request, make_sonarr_request
     
-    result = {"queues": {}}
+    lines = ["Download Queue:"]
     
     if service in ["radarr", "both"]:
         params = {"includeUnknownMovieItems": include_unknown}
         radarr_queue = make_radarr_request(config, "queue", params=params)
         
-        result["queues"]["radarr"] = {
-            "count": len(radarr_queue.get("records", [])),
-            "items": [
-                {
-                    "id": item.get("id"),
-                    "movieId": item.get("movieId"),
-                    "title": item.get("title"),
-                    "size": item.get("size", 0),
-                    "sizeleft": item.get("sizeleft", 0),
-                    "timeleft": item.get("timeleft"),
-                    "status": item.get("status"),
-                    "trackedDownloadStatus": item.get("trackedDownloadStatus"),
-                    "downloadClient": item.get("downloadClient"),
-                    "protocol": item.get("protocol"),
-                    "quality": item.get("quality", {})
-                }
-                for item in radarr_queue.get("records", [])[:50]
-            ]
-        }
+        items = radarr_queue.get("records", [])
+        if items:
+            lines.append(f"\nRADAR ({len(items)} items):")
+            for item in items[:50]:
+                title = item.get("title", "Unknown")
+                status = item.get("status", "Unknown")
+                size = item.get("size", 0)
+                size_left = item.get("sizeleft", 0)
+                progress = ""
+                if size > 0:
+                    progress_pct = ((size - size_left) / size * 100)
+                    progress = f" ({progress_pct:.1f}%)"
+                lines.append(f"  {title} - {status}{progress}")
+        else:
+            lines.append("\nRADAR: Empty")
     
     if service in ["sonarr", "both"]:
         params = {"includeUnknownSeriesItems": include_unknown}
         sonarr_queue = make_sonarr_request(config, "queue", params=params)
         
-        result["queues"]["sonarr"] = {
-            "count": len(sonarr_queue.get("records", [])),
-            "items": [
-                {
-                    "id": item.get("id"),
-                    "seriesId": item.get("seriesId"),
-                    "episodeId": item.get("episodeId"),
-                    "title": item.get("title"),
-                    "size": item.get("size", 0),
-                    "sizeleft": item.get("sizeleft", 0),
-                    "timeleft": item.get("timeleft"),
-                    "status": item.get("status"),
-                    "trackedDownloadStatus": item.get("trackedDownloadStatus"),
-                    "downloadClient": item.get("downloadClient"),
-                    "protocol": item.get("protocol"),
-                    "quality": item.get("quality", {})
-                }
-                for item in sonarr_queue.get("records", [])[:50]
-            ]
-        }
+        items = sonarr_queue.get("records", [])
+        if items:
+            lines.append(f"\nSONARR ({len(items)} items):")
+            for item in items[:50]:
+                title = item.get("title", "Unknown")
+                status = item.get("status", "Unknown")
+                size = item.get("size", 0)
+                size_left = item.get("sizeleft", 0)
+                progress = ""
+                if size > 0:
+                    progress_pct = ((size - size_left) / size * 100)
+                    progress = f" ({progress_pct:.1f}%)"
+                lines.append(f"  {title} - {status}{progress}")
+        else:
+            lines.append("\nSONARR: Empty")
     
-    return result
+    if len(lines) == 1:  # Only header
+        return "Download queue is empty."
+    
+    return "\n".join(lines)
 
 
 def handle_remove_from_queue(config: Dict[str, Any], service: str, queue_id: int, 

@@ -20,6 +20,7 @@ from .handlers_extended import (
     handle_disk_space, handle_execute_command, handle_get_collections,
     handle_refresh_monitored
 )
+from .response_formatter import format_response
 
 # Set up logging to stderr (never to stdout as it corrupts MCP JSON-RPC)
 logging.basicConfig(
@@ -546,58 +547,51 @@ async def handle_call_tool(
                 downloaded_filter = arguments["downloaded"]
                 series = [s for s in series if (s.get("statistics", {}).get("episodeFileCount", 0) > 0) == downloaded_filter]
             
-            result = {
-                "count": len(series),
-                "series": [
-                    {
-                        "id": s.get("id"),
-                        "title": s.get("title"),
-                        "year": s.get("year"),
-                        "monitored": s.get("monitored"),
-                        "status": s.get("status"),
-                        "episodeCount": s.get("statistics", {}).get("episodeCount", 0),
-                        "episodeFileCount": s.get("statistics", {}).get("episodeFileCount", 0),
-                        "overview": s.get("overview", "")[:200] + "..." if len(s.get("overview", "")) > 200 else s.get("overview", "")
-                    }
-                    for s in series[:50]  # Limit to 50 results
-                ]
-            }
+            if not series:
+                result = "No series found."
+            else:
+                lines = [f"{len(series)} series:"]
+                for s in series[:50]:  # Limit to 50 results
+                    title = s.get("title", "Unknown")
+                    year = s.get("year", "Unknown")
+                    ep_count = s.get("statistics", {}).get("episodeFileCount", 0)
+                    total_eps = s.get("statistics", {}).get("episodeCount", 0)
+                    lines.append(f"  {title} ({year}) - {ep_count}/{total_eps}")
+                
+                if len(series) > 50:
+                    lines.append(f"  ... {len(series) - 50} more")
+                
+                result = "\n".join(lines)
             
         elif name == "search_radarr_movies":
             term = arguments["term"]
             movies = make_radarr_request(config, "movie/lookup", {"term": term})
             
-            result = {
-                "count": len(movies),
-                "movies": [
-                    {
-                        "title": m.get("title"),
-                        "year": m.get("year"),
-                        "tmdbId": m.get("tmdbId"),
-                        "imdbId": m.get("imdbId"),
-                        "overview": m.get("overview", "")[:200] + "..." if len(m.get("overview", "")) > 200 else m.get("overview", "")
-                    }
-                    for m in movies[:20]  # Limit to 20 results
-                ]
-            }
+            if not movies:
+                result = "No movies found in search."
+            else:
+                lines = [f"Found {len(movies)} movies in search:"]
+                for m in movies[:20]:  # Limit to 20 results
+                    title = m.get("title", "Unknown")
+                    year = m.get("year", "Unknown")
+                    tmdb_id = m.get("tmdbId")
+                    lines.append(f"  {title} ({year}) - ID: {tmdb_id}")
+                result = "\n".join(lines)
             
         elif name == "search_sonarr_series":
             term = arguments["term"]
             series = make_sonarr_request(config, "series/lookup", {"term": term})
             
-            result = {
-                "count": len(series),
-                "series": [
-                    {
-                        "title": s.get("title"),
-                        "year": s.get("year"),
-                        "tvdbId": s.get("tvdbId"),
-                        "imdbId": s.get("imdbId"),
-                        "overview": s.get("overview", "")[:200] + "..." if len(s.get("overview", "")) > 200 else s.get("overview", "")
-                    }
-                    for s in series[:20]  # Limit to 20 results
-                ]
-            }
+            if not series:
+                result = "No series found in search."
+            else:
+                lines = [f"Found {len(series)} series in search:"]
+                for s in series[:20]:  # Limit to 20 results
+                    title = s.get("title", "Unknown")
+                    year = s.get("year", "Unknown")
+                    tvdb_id = s.get("tvdbId")
+                    lines.append(f"  {title} ({year}) - ID: {tvdb_id}")
+                result = "\n".join(lines)
             
         elif name == "add_radarr_movie":
             tmdb_id = arguments["tmdbId"]
@@ -1027,7 +1021,12 @@ async def handle_call_tool(
         else:
             raise ValueError(f"Unknown tool: {name}")
             
-        return [types.TextContent(type="text", text=str(result))]
+        # Return result - string if already formatted, otherwise format it
+        if isinstance(result, str):
+            return [types.TextContent(type="text", text=result)]
+        else:
+            formatted_text = format_response(result, name)
+            return [types.TextContent(type="text", text=formatted_text)]
         
     except Exception as e:
         logger.error(f"Tool call failed: {e}")
