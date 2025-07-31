@@ -404,16 +404,31 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_radarr_movie_by_id",
-            description="Get detailed information about a specific movie",
+            description="Get detailed information about a specific movie by Radarr ID (use get_radarr_movies to find IDs)",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "id": {
                         "type": "integer",
-                        "description": "The movie ID"
+                        "description": "The Radarr internal ID (not TMDB ID)"
                     }
                 },
                 "required": ["id"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
+            name="get_radarr_movie_by_tmdb_id",
+            description="Get detailed information about a movie by TMDB ID",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tmdbId": {
+                        "type": "integer",
+                        "description": "The TMDB ID of the movie"
+                    }
+                },
+                "required": ["tmdbId"],
                 "additionalProperties": False
             }
         ),
@@ -820,6 +835,43 @@ async def handle_call_tool(
                     "tags": movie.get("tags", [])
                 }
             }
+            
+        elif name == "get_radarr_movie_by_tmdb_id":
+            tmdb_id = arguments["tmdbId"]
+            
+            # Get all movies and find the one with matching TMDB ID
+            all_movies = make_radarr_request(config, "movie")
+            movie = None
+            for m in all_movies:
+                if m.get("tmdbId") == tmdb_id:
+                    movie = m
+                    break
+            
+            if not movie:
+                result = f"No movie found with TMDB ID {tmdb_id} in your Radarr library."
+            else:
+                result = {
+                    "movie": {
+                        "id": movie.get("id"),
+                        "title": movie.get("title"),
+                        "year": movie.get("year"),
+                        "tmdbId": movie.get("tmdbId"),
+                        "imdbId": movie.get("imdbId"),
+                        "overview": movie.get("overview"),
+                        "status": movie.get("status"),
+                        "monitored": movie.get("monitored"),
+                        "hasFile": movie.get("hasFile", False),
+                        "qualityProfileId": movie.get("qualityProfileId"),
+                        "minimumAvailability": movie.get("minimumAvailability"),
+                        "rootFolderPath": movie.get("rootFolderPath"),
+                        "path": movie.get("path"),
+                        "runtime": movie.get("runtime"),
+                        "genres": movie.get("genres", []),
+                        "ratings": movie.get("ratings", {}),
+                        "sizeOnDisk": movie.get("sizeOnDisk", 0),
+                        "tags": movie.get("tags", [])
+                    }
+                }
             
         elif name == "get_sonarr_series_by_id":
             series_id = arguments["id"]
