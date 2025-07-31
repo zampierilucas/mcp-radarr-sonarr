@@ -548,7 +548,7 @@ async def handle_call_tool(
                         "status": m.get("status"),
                         "overview": m.get("overview", "")[:200] + "..." if len(m.get("overview", "")) > 200 else m.get("overview", "")
                     }
-                    for m in movies[:50]  # Limit to 50 results
+                    for m in movies  # Return all movies
                 ]
             }
             
@@ -567,15 +567,12 @@ async def handle_call_tool(
                 result = "No series found."
             else:
                 lines = [f"{len(series)} series:"]
-                for s in series[:50]:  # Limit to 50 results
+                for s in series:  # Return all series
                     title = s.get("title", "Unknown")
                     year = s.get("year", "Unknown")
                     ep_count = s.get("statistics", {}).get("episodeFileCount", 0)
                     total_eps = s.get("statistics", {}).get("episodeCount", 0)
                     lines.append(f"  {title} ({year}) - {ep_count}/{total_eps}")
-                
-                if len(series) > 50:
-                    lines.append(f"  ... {len(series) - 50} more")
                 
                 result = "\n".join(lines)
             

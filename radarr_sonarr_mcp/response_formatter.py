@@ -59,9 +59,6 @@ def _format_media_list(result: Dict[str, Any], tool_name: str) -> str:
             tmdb_id = item.get("tmdbId", "?")
             lines.append(f"  [{item_id}] {title} ({year}) - TMDB: {tmdb_id}")
     
-    if count > len(items):
-        lines.append(f"  ... {count - len(items)} more")
-    
     return "\n".join(lines)
 
 
