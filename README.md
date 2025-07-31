@@ -2,7 +2,7 @@
 
 A Python-based Model Context Protocol (MCP) server that provides comprehensive access to your Radarr (movies) and Sonarr (TV series) media libraries.
 
-Based on the original work by [hannesrudolph/mcp-server-radarr-sonarr](https://github.com/hannesrudolph/mcp-server-radarr-sonarr), this fork adds extensive functionality with 28 tools for complete media library management.
+Based on the original work by [hannesrudolph/mcp-server-radarr-sonarr](https://github.com/hannesrudolph/mcp-server-radarr-sonarr), this fork adds extensive functionality with 29 tools for complete media library management.
 
 ## Installation
 
@@ -48,7 +48,8 @@ pip install -e .
 - `delete_sonarr_series` - Remove TV series from library
 - `update_radarr_movie` - Update movie settings (monitoring, quality)
 - `update_sonarr_series` - Update series settings
-- `get_radarr_movie_by_id` - Get detailed movie information
+- `get_radarr_movie_by_id` - Get detailed movie information by Radarr ID
+- `get_radarr_movie_by_tmdb_id` - Get detailed movie information by TMDB ID
 - `get_sonarr_series_by_id` - Get detailed series information
 
 ### Episode Management (Sonarr)
