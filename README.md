@@ -10,9 +10,6 @@ Based on the original work by [hannesrudolph/mcp-server-radarr-sonarr](https://g
 # Install latest version directly from GitHub
 pip install git+https://github.com/zampierilucas/mcp-radarr-sonarr.git
 
-# Install from development branch
-pip install git+https://github.com/zampierilucas/mcp-radarr-sonarr.git@development
-
 # Install from source (for development)
 git clone https://github.com/zampierilucas/mcp-radarr-sonarr.git
 cd mcp-radarr-sonarr
