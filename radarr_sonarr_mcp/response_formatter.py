@@ -1,6 +1,7 @@
 """Response formatter to make API responses more concise and Claude-friendly."""
 
 import json
+from datetime import datetime
 from typing import Any, Dict, List
 
 
@@ -180,6 +181,22 @@ def _format_download_queue(result: Dict[str, Any]) -> str:
 
 def _format_calendar(result: Dict[str, Any], tool_name: str) -> str:
     """Format calendar results."""
+    def format_date(date_str):
+        """Format ISO date to readable format."""
+        if not date_str or date_str == "TBA":
+            return "TBA"
+        try:
+            # Handle ISO format with or without timezone
+            if "T" in date_str:
+                dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                return dt.strftime("%B %d, %Y")
+            else:
+                # Already a simple date
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
+                return dt.strftime("%B %d, %Y")
+        except:
+            return date_str
+    
     media_type = "movies" if "radarr" in tool_name else "episodes"
     items = result.get(media_type, [])
     count = result.get("count", len(items))
@@ -193,14 +210,18 @@ def _format_calendar(result: Dict[str, Any], tool_name: str) -> str:
         if media_type == "movies":
             title = item.get("title", "Unknown")
             date = item.get("releaseDate") or item.get("inCinemas", "TBA")
-            lines.append(f"  {title} - {date}")
+            formatted_date = format_date(date)
+            lines.append(f"  {title} - {formatted_date}")
         else:
             title = item.get("title", "Unknown")
-            series_title = item.get("series", {}).get("title", "Unknown")
+            series_title = item.get("series", {}).get("title")
+            if not series_title or series_title == "None":
+                series_title = f"Series ID {item.get('seriesId', '?')}"
             season = item.get("seasonNumber", "?")
             episode = item.get("episodeNumber", "?")
             air_date = item.get("airDate", "TBA")
-            lines.append(f"  {series_title} S{season:02d}E{episode:02d}: {title} - {air_date}")
+            formatted_date = format_date(air_date)
+            lines.append(f"  {series_title} S{season:02d}E{episode:02d}: {title} - {formatted_date}")
     
     return "\n".join(lines)
 

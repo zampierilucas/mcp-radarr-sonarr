@@ -983,12 +983,28 @@ async def handle_call_tool(
                                         arguments.get("movieId"), arguments.get("seriesId"))
             
         elif name == "get_radarr_calendar":
-            result = handle_calendar(config, "radarr", arguments.get("start"),
-                                   arguments.get("end"), arguments.get("unmonitored", False))
+            # If no dates provided, use sensible defaults
+            from datetime import datetime, timedelta
+            start = arguments.get("start")
+            end = arguments.get("end")
+            if not start:
+                start = datetime.now().strftime("%Y-%m-%d")
+            if not end:
+                end = (datetime.now() + timedelta(days=90)).strftime("%Y-%m-%d")
+            
+            result = handle_calendar(config, "radarr", start, end, arguments.get("unmonitored", False))
             
         elif name == "get_sonarr_calendar":
-            result = handle_calendar(config, "sonarr", arguments.get("start"),
-                                   arguments.get("end"), arguments.get("unmonitored", False))
+            # If no dates provided, use sensible defaults
+            from datetime import datetime, timedelta
+            start = arguments.get("start")
+            end = arguments.get("end")
+            if not start:
+                start = datetime.now().strftime("%Y-%m-%d")
+            if not end:
+                end = (datetime.now() + timedelta(days=90)).strftime("%Y-%m-%d")
+                
+            result = handle_calendar(config, "sonarr", start, end, arguments.get("unmonitored", False))
             
         elif name == "get_wanted_missing":
             result = handle_wanted(config, arguments["service"], missing=True,
