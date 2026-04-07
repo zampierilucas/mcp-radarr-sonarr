@@ -1252,12 +1252,9 @@ async def main():
         from starlette.routing import Mount, Route
         import uvicorn
 
-        msg_path = os.getenv("MCP_MESSAGE_PATH", "/messages/")
-        if not msg_path.startswith("/"):
-            msg_path = "/" + msg_path
-        if not msg_path.endswith("/"):
-            msg_path = msg_path + "/"
-        sse = SseServerTransport(msg_path)
+        prefix = os.getenv("MCP_BASE_PATH", "").strip("/")
+        base = f"/{prefix}" if prefix else ""
+        sse = SseServerTransport(f"{base}/messages/")
 
         async def handle_sse(request):
             async with sse.connect_sse(
@@ -1266,14 +1263,10 @@ async def main():
                 await server.run(streams[0], streams[1], init_options)
             return Response()
 
-        sse_path = os.getenv("MCP_SSE_PATH", "/sse")
-        if not sse_path.startswith("/"):
-            sse_path = "/" + sse_path
-
         app = Starlette(
             routes=[
-                Route(sse_path, endpoint=handle_sse),
-                Mount(msg_path, app=sse.handle_post_message),
+                Route(f"{base}/sse", endpoint=handle_sse),
+                Mount(f"{base}/messages/", app=sse.handle_post_message),
             ],
         )
 
