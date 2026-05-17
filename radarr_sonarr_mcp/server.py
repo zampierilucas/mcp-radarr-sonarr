@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 """MCP server for Radarr and Sonarr integration with Claude Code."""
 
+import argparse
 import asyncio
+import contextlib
 import logging
+import os
 import sys
 from typing import Any, Optional
 
@@ -1174,23 +1177,101 @@ async def handle_read_resource(uri: str) -> str:
         return f"Error: {str(e)}"
 
 
-async def main():
-    """Main entry point for the MCP server."""
-    # Run the server using stdin/stdout streams
+def _init_options() -> InitializationOptions:
+    return InitializationOptions(
+        server_name="radarr-sonarr-mcp",
+        server_version="0.1.0",
+        capabilities=server.get_capabilities(
+            notification_options=NotificationOptions(),
+            experimental_capabilities={},
+        ),
+    )
+
+
+async def _run_stdio() -> None:
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name="radarr-sonarr-mcp",
-                server_version="0.1.0",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
-        )
+        await server.run(read_stream, write_stream, _init_options())
+
+
+def _run_sse(host: str, port: int) -> None:
+    import uvicorn
+    from mcp.server.sse import SseServerTransport
+    from starlette.applications import Starlette
+    from starlette.responses import Response
+    from starlette.routing import Mount, Route
+
+    sse = SseServerTransport("/messages/")
+
+    async def handle_sse(request):
+        async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
+            await server.run(streams[0], streams[1], _init_options())
+        return Response()
+
+    app = Starlette(
+        routes=[
+            Route("/sse", endpoint=handle_sse, methods=["GET"]),
+            Mount("/messages/", app=sse.handle_post_message),
+        ]
+    )
+    uvicorn.run(app, host=host, port=port)
+
+
+def _run_streamable_http(host: str, port: int) -> None:
+    import uvicorn
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+
+    session_manager = StreamableHTTPSessionManager(app=server, json_response=False, stateless=False)
+
+    async def handle_streamable_http(scope, receive, send):
+        await session_manager.handle_request(scope, receive, send)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app):
+        async with session_manager.run():
+            yield
+
+    app = Starlette(
+        routes=[Mount("/mcp", app=handle_streamable_http)],
+        lifespan=lifespan,
+    )
+    uvicorn.run(app, host=host, port=port)
+
+
+def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Radarr/Sonarr MCP server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default=os.environ.get("RADARR_SONARR_MCP_TRANSPORT", "stdio"),
+        help="Transport to use (default: stdio)",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("RADARR_SONARR_MCP_HOST", "0.0.0.0"),
+        help="Host to bind when using sse or streamable-http (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("RADARR_SONARR_MCP_PORT", "8773")),
+        help="Port to bind when using sse or streamable-http (default: 8773)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[list[str]] = None) -> None:
+    args = _parse_args(argv)
+    if args.transport == "stdio":
+        asyncio.run(_run_stdio())
+    elif args.transport == "sse":
+        _run_sse(args.host, args.port)
+    elif args.transport == "streamable-http":
+        _run_streamable_http(args.host, args.port)
+    else:
+        raise ValueError(f"Unknown transport: {args.transport}")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

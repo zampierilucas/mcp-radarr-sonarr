@@ -6,11 +6,22 @@ Based on the original work by [hannesrudolph/mcp-server-radarr-sonarr](https://g
 
 ## Installation
 
+Recommended: install into a project-local venv with `uv`.
+
+```bash
+git clone https://github.com/zampierilucas/mcp-radarr-sonarr.git
+cd mcp-radarr-sonarr
+uv venv
+uv pip install -e .
+```
+
+Other options:
+
 ```bash
 # Install latest version directly from GitHub
 pip install git+https://github.com/zampierilucas/mcp-radarr-sonarr.git
 
-# Install from source (for development)
+# Install from source (pip)
 git clone https://github.com/zampierilucas/mcp-radarr-sonarr.git
 cd mcp-radarr-sonarr
 pip install -e .
@@ -20,27 +31,60 @@ pip install -e .
 
 1. Configure the server:
    ```bash
-   radarr-sonarr-mcp configure
+   ./.venv/bin/radarr-sonarr-mcp configure
    ```
 
 2. Add to Claude Code MCP configuration:
-   
+
    Using the CLI (recommended):
    ```bash
-   claude mcp add radarr-sonarr -- python -m radarr_sonarr_mcp.server
+   claude mcp add radarr-sonarr -- /absolute/path/to/mcp-radarr-sonarr/.venv/bin/python -m radarr_sonarr_mcp.server
    ```
-   
+
    Or manually edit your MCP config:
    ```json
    {
      "mcpServers": {
        "radarr-sonarr": {
-         "command": "python",
+         "command": "/absolute/path/to/mcp-radarr-sonarr/.venv/bin/python",
          "args": ["-m", "radarr_sonarr_mcp.server"]
        }
      }
    }
    ```
+
+## Transports
+
+The server supports three transports. STDIO is the default.
+
+```bash
+# STDIO (default; for Claude Code spawning the server per session)
+./.venv/bin/python -m radarr_sonarr_mcp.server
+
+# SSE (HTTP daemon, shared by multiple clients)
+./.venv/bin/python -m radarr_sonarr_mcp.server --transport sse --host 0.0.0.0 --port 8773
+#   Client URL: http://<host>:8773/sse
+
+# Streamable HTTP
+./.venv/bin/python -m radarr_sonarr_mcp.server --transport streamable-http --host 0.0.0.0 --port 8773
+#   Client URL: http://<host>:8773/mcp
+```
+
+Environment variables are also honored: `RADARR_SONARR_MCP_TRANSPORT`,
+`RADARR_SONARR_MCP_HOST`, `RADARR_SONARR_MCP_PORT`.
+
+Example Claude Code config for an HTTP/SSE daemon:
+
+```json
+{
+  "mcpServers": {
+    "radarr-sonarr": {
+      "type": "sse",
+      "url": "http://<host>:8773/sse"
+    }
+  }
+}
+```
 
 ## Available Tools
 
@@ -131,6 +175,7 @@ Ask Claude Code:
 
 ## Security
 
-- Uses STDIO transport (no HTTP endpoints)
+- STDIO transport is the default; SSE / Streamable-HTTP transports are opt-in
 - API keys stored locally
-- All communication happens on your machine
+- When using HTTP transports, bind to a trusted network (e.g. Tailscale, LAN) or
+  add an authenticating reverse proxy in front
